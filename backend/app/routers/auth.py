@@ -5,13 +5,14 @@ in registration order, not by specificity, so that catch-all router MUST be
 included in main.py after this one — otherwise GET /me would match
 /{short_code} first (with short_code="me") and never reach this handler.
 """
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from app.auth.dependencies import get_current_user
 from app.auth.security import create_access_token
 from app.database import get_db
 from app.models import User
+from app.rate_limit import limiter
 from app.schemas.auth import Token, UserLogin
 from app.schemas.user import UserCreate, UserOut
 from app.services import auth_service
@@ -21,7 +22,8 @@ router = APIRouter(tags=["auth"])
 
 
 @router.post("/register", response_model=UserOut, status_code=status.HTTP_201_CREATED)
-def register(user_in: UserCreate, db: Session = Depends(get_db)) -> User:
+@limiter.limit("5/minute")
+def register(request: Request, user_in: UserCreate, db: Session = Depends(get_db)) -> User:
     try:
         return auth_service.register_user(db, user_in)
     except EmailAlreadyExistsError:
@@ -31,7 +33,8 @@ def register(user_in: UserCreate, db: Session = Depends(get_db)) -> User:
 
 
 @router.post("/login", response_model=Token)
-def login(credentials: UserLogin, db: Session = Depends(get_db)) -> Token:
+@limiter.limit("5/minute")
+def login(request: Request, credentials: UserLogin, db: Session = Depends(get_db)) -> Token:
     try:
         user = auth_service.authenticate_user(db, credentials.email, credentials.password)
     except InvalidCredentialsError:

@@ -16,18 +16,35 @@ of how many times the code under test committed.
 """
 import os
 
+# Must happen before any `app.*` module is imported: app.config reads
+# REDIS_URL into `settings` once, at import time, and app.rate_limit /
+# app.cache build their Redis clients off that same `settings` object.
+# Redis DB 1 (vs. the app's normal DB 0) keeps test rate-limit counters and
+# cache entries fully separate from whatever's running under `docker
+# compose up` — same idea as TEST_DATABASE_URL below, just for Redis.
+os.environ["REDIS_URL"] = os.getenv("TEST_REDIS_URL", "redis://redis:6379/1")
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 
+from app.cache import redis_client
 from app.database import Base, get_db
 from app.main import app
 from app.models import Click, URL, User  # noqa: F401  (registers tables on Base.metadata)
+from app.rate_limit import limiter
 
 TEST_DATABASE_URL = os.getenv(
     "TEST_DATABASE_URL", "postgresql://postgres:postgres@postgres:5432/urlshortener_test"
 )
+
+# Rate limiting is disabled by default for the suite: our tests call
+# /register and /login far more times per run than a real user ever would
+# (e.g. `_register_and_login` helpers in test_urls.py), and production-
+# strength limits would make most of the existing tests flaky. One test
+# (test_rate_limit.py) re-enables it to actually prove the limiting works.
+limiter.enabled = False
 
 engine = create_engine(TEST_DATABASE_URL)
 TestingSessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
@@ -37,6 +54,19 @@ TestingSessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=Fals
 def create_schema():
     """create_all is idempotent (checks for existing tables), so this is safe to run every session."""
     Base.metadata.create_all(bind=engine)
+    yield
+
+
+@pytest.fixture(scope="session", autouse=True)
+def flush_test_redis():
+    """
+    Redis DB 1 is dedicated to tests (see REDIS_URL override above), so
+    wiping it at the start of every session is safe and keeps rate-limit
+    counters and cache entries from a previous run bleeding into this one —
+    the same "run the suite as many times as you want" guarantee the
+    Postgres per-test rollback gives us, just via a full flush instead.
+    """
+    redis_client.flushdb()
     yield
 
 
