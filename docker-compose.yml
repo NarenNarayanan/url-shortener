@@ -35,6 +35,7 @@ services:
   backend:
     build:
       context: ./backend
+      target: dev
     container_name: url-shortener-backend
     restart: unless-stopped
     env_file:
