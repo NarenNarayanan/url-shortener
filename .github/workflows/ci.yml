@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  backend-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Same docker-compose setup as local dev, on purpose -- this exercises
+      # the actual Dockerfile/compose config, not a hand-rolled CI-only
+      # substitute, and matches the project's own "test against real
+      # Postgres/Redis" philosophy (see README).
+      - name: Build and start Postgres, Redis, backend
+        run: docker compose up -d --build postgres redis backend
+
+      - name: Wait for Postgres and Redis to be healthy
+        run: |
+          timeout 60 sh -c '
+            until [ "$(docker inspect -f "{{.State.Health.Status}}" url-shortener-postgres)" = "healthy" ] && \
+                  [ "$(docker inspect -f "{{.State.Health.Status}}" url-shortener-redis)" = "healthy" ]; do
+              sleep 2
+            done
+          '
+
+      - name: Run migrations
+        run: docker compose exec -T backend alembic upgrade head
+
+      - name: Run tests
+        run: docker compose exec -T backend pytest -v
+
+      - name: Show container logs on failure
+        if: failure()
+        run: docker compose logs
+
+  frontend-checks:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run build

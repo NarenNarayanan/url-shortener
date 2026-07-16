@@ -1,5 +1,7 @@
 # URL Shortener
 
+[![CI](https://github.com/NarenNarayanan/url-shortener/actions/workflows/ci.yml/badge.svg)](https://github.com/NarenNarayanan/url-shortener/actions/workflows/ci.yml)
+
 A URL shortener, built incrementally: FastAPI backend, React frontend, Postgres for storage, Redis for caching redirects and rate limiting.
 
 ## Stack
