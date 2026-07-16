@@ -5,17 +5,18 @@ exceptions into HTTP responses.
 """
 import json
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Literal
 
 from redis import Redis
-from sqlalchemy import or_
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.models import URL, Click, User
 from app.schemas.url import URLCreate, URLUpdate
 from app.utils.exceptions import URLExpiredError, URLNotFoundError
 from app.utils.short_code import generate_short_code
+from app.utils.user_agent import parse_user_agent
 
 MAX_SHORT_CODE_ATTEMPTS = 5
 CACHE_KEY_PREFIX = "url:short_code:"
@@ -85,7 +86,16 @@ def get_active_url_by_code(db: Session, redis_client: Redis, short_code: str, ca
 
 
 def record_click(db: Session, url_id: int, ip_address: str | None, user_agent: str | None, referrer: str | None) -> None:
-    db.add(Click(url_id=url_id, ip_address=ip_address, user_agent=user_agent, referrer=referrer))
+    browser, os_name, device_type = parse_user_agent(user_agent)
+    db.add(Click(
+        url_id=url_id,
+        ip_address=ip_address,
+        user_agent=user_agent,
+        referrer=referrer,
+        browser=browser,
+        os=os_name,
+        device_type=device_type,
+    ))
     # Atomic increment via SQL expression (read-modify-write in Python would
     # race under concurrent redirects) — see URL model notes.
     db.query(URL).filter(URL.id == url_id).update({
@@ -149,3 +159,44 @@ def delete_url(db: Session, redis_client: Redis, owner: User, short_code: str) -
     db.delete(url)
     db.commit()
     redis_client.delete(_cache_key(short_code))
+
+
+def _breakdown(db: Session, url_id: int, column) -> list[dict]:
+    rows = (
+        db.query(column.label("label"), func.count().label("count"))
+        .filter(Click.url_id == url_id)
+        .group_by(column)
+        .order_by(func.count().desc())
+        .all()
+    )
+    return [{"label": row.label or "unknown", "count": row.count} for row in rows]
+
+
+def get_url_analytics(
+    db: Session,
+    owner: User,
+    short_code: str,
+    days: int,
+    group_by: Literal["day", "week"],
+) -> dict:
+    url = _get_owned_url(db, owner, short_code)
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+
+    period = func.date_trunc(group_by, Click.timestamp)
+    time_series_rows = (
+        db.query(period.label("period"), func.count().label("count"))
+        .filter(Click.url_id == url.id, Click.timestamp >= since)
+        .group_by("period")
+        .order_by("period")
+        .all()
+    )
+
+    return {
+        "short_code": url.short_code,
+        "total_clicks": url.click_count,
+        "group_by": group_by,
+        "clicks_over_time": [{"period": row.period, "count": row.count} for row in time_series_rows],
+        "by_browser": _breakdown(db, url.id, Click.browser),
+        "by_os": _breakdown(db, url.id, Click.os),
+        "by_device_type": _breakdown(db, url.id, Click.device_type),
+    }
