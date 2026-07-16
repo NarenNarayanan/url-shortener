@@ -33,10 +33,10 @@ Not built yet: deployment. See the roadmap at the bottom.
 Needs Docker + Docker Compose.
 
 ```bash
-cp backend/.env.example backend/.env
-cp frontend/.env.example frontend/.env
 docker compose up --build
 ```
+
+`backend/.env` and `frontend/.env` are already committed (see "design decisions" below for why) — no need to copy them from the `.env.example` templates. Those templates exist for reference/first-time setup on a fresh fork.
 
 - API: http://localhost:8000/docs
 - Frontend: http://localhost:5173
@@ -59,6 +59,7 @@ Tests run against a real Postgres database (`urlshortener_test`) and a dedicated
 ## Project structure
 
 ```
+.github/workflows/  # CI — runs backend tests + frontend typecheck/lint/build on every push/PR
 backend/
   app/
     routers/       # HTTP layer only — request/response shape, no business logic
@@ -79,6 +80,7 @@ frontend/
     pages/          # route-level components (Landing, Login, Register, Dashboard, Analytics)
     components/     # reusable components; components/ui is shadcn-managed
     contexts/       # AuthContext (token + current user)
+    hooks/          # small reusable hooks (e.g. debounced search input)
     lib/            # API client, typed endpoint functions, validation schemas
     types/          # TypeScript types mirroring backend Pydantic schemas
 docker-compose.yml
@@ -102,6 +104,8 @@ docker-compose.yml
 Full interactive docs (Swagger) at `/docs` once the backend is running.
 
 ## A few design decisions worth explaining
+
+**`.env` files are committed, not gitignored.** Unusual, and deliberate: there's no shared secrets manager for this project, so the committed `.env` files (with placeholder, non-sensitive values) are the actual channel for keeping config in sync between collaborators. `.env.example` still exists alongside them as a template for anyone forking the repo fresh. Revisit this if real secrets ever end up in those files.
 
 **Login takes a JSON body, not FastAPI's OAuth2 form-login flow.** The frontend is a JSON API client, so a form-encoded login endpoint would be the odd one out. You lose Swagger's auto-filled OAuth2 "Authorize" flow, but you can still paste a bearer token into Swagger's Authorize dialog directly.
 
