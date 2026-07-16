@@ -9,8 +9,11 @@ import ipaddress
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import RedirectResponse
+from redis import Redis
 from sqlalchemy.orm import Session
 
+from app.cache import get_redis
+from app.config import settings
 from app.database import get_db
 from app.services import url_service
 from app.utils.exceptions import URLExpiredError, URLNotFoundError
@@ -36,9 +39,12 @@ def redirect_to_original(
     short_code: str,
     request: Request,
     db: Session = Depends(get_db),
+    redis_client: Redis = Depends(get_redis),
 ) -> RedirectResponse:
     try:
-        url = url_service.get_active_url_by_code(db, short_code)
+        resolved = url_service.get_active_url_by_code(
+            db, redis_client, short_code, settings.redis_cache_ttl_seconds
+        )
     except URLNotFoundError:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Short link not found")
     except URLExpiredError:
@@ -46,9 +52,9 @@ def redirect_to_original(
 
     url_service.record_click(
         db,
-        url,
+        resolved.id,
         ip_address=_client_ip(request),
         user_agent=request.headers.get("user-agent"),
         referrer=request.headers.get("referer"),
     )
-    return RedirectResponse(url=url.original_url, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
+    return RedirectResponse(url=resolved.original_url, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
