@@ -6,12 +6,14 @@ exceptions into HTTP responses.
 import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import Literal
 
 from redis import Redis
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.models import URL, Click, User
-from app.schemas.url import URLCreate
+from app.schemas.url import URLCreate, URLUpdate
 from app.utils.exceptions import URLExpiredError, URLNotFoundError
 from app.utils.short_code import generate_short_code
 
@@ -91,3 +93,59 @@ def record_click(db: Session, url_id: int, ip_address: str | None, user_agent: s
         "last_clicked_at": datetime.now(timezone.utc),
     })
     db.commit()
+
+
+def _get_owned_url(db: Session, owner: User, short_code: str) -> URL:
+    # Same 404 whether the code doesn't exist or belongs to someone else —
+    # confirming "this code exists but isn't yours" would leak information
+    # about other users' links, same reasoning as login's generic error.
+    url = db.query(URL).filter(URL.short_code == short_code, URL.user_id == owner.id).first()
+    if url is None:
+        raise URLNotFoundError(short_code)
+    return url
+
+
+def list_urls_for_owner(
+    db: Session,
+    owner: User,
+    page: int,
+    page_size: int,
+    search: str | None,
+    sort_by: Literal["created_at", "click_count"],
+    order: Literal["asc", "desc"],
+) -> tuple[list[URL], int]:
+    query = db.query(URL).filter(URL.user_id == owner.id)
+    if search:
+        pattern = f"%{search}%"
+        query = query.filter(or_(URL.original_url.ilike(pattern), URL.short_code.ilike(pattern)))
+
+    total = query.count()
+
+    sort_column = URL.created_at if sort_by == "created_at" else URL.click_count
+    query = query.order_by(sort_column.desc() if order == "desc" else sort_column.asc())
+
+    items = query.offset((page - 1) * page_size).limit(page_size).all()
+    return items, total
+
+
+def update_url(db: Session, redis_client: Redis, owner: User, short_code: str, url_in: URLUpdate) -> URL:
+    url = _get_owned_url(db, owner, short_code)
+
+    if url_in.original_url is not None:
+        url.original_url = str(url_in.original_url)
+    if "expires_at" in url_in.model_fields_set:
+        url.expires_at = url_in.expires_at
+
+    db.commit()
+    db.refresh(url)
+    # Without this, a stale cached destination (or expiry) could keep being
+    # served for up to redis_cache_ttl_seconds after the edit.
+    redis_client.delete(_cache_key(short_code))
+    return url
+
+
+def delete_url(db: Session, redis_client: Redis, owner: User, short_code: str) -> None:
+    url = _get_owned_url(db, owner, short_code)
+    db.delete(url)
+    db.commit()
+    redis_client.delete(_cache_key(short_code))

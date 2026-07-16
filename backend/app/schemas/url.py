@@ -10,6 +10,18 @@ class URLCreate(BaseModel):
     expires_at: datetime | None = None
 
 
+class URLUpdate(BaseModel):
+    """
+    Both fields are optional since PATCH is a partial update. `expires_at`
+    needs to distinguish "not sent" (leave unchanged) from "sent as null"
+    (clear the expiration) — a plain default of None can't tell those apart,
+    so routers/services check `"expires_at" in url_in.model_fields_set`
+    instead of just `url_in.expires_at is None`.
+    """
+    original_url: HttpUrl | None = None
+    expires_at: datetime | None = None
+
+
 class URLOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -36,3 +48,10 @@ class URLOut(BaseModel):
             last_clicked_at=url.last_clicked_at,
             is_expired=url.is_expired,
         )
+
+
+class URLListResponse(BaseModel):
+    items: list[URLOut]
+    total: int
+    page: int
+    page_size: int
