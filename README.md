@@ -26,7 +26,7 @@ A URL shortener, built incrementally: FastAPI backend, React frontend, Postgres 
 - DB schema + Alembic migrations for `users`, `urls`, `clicks`
 - Test suite (31 tests) running against a real Postgres + Redis, not mocks/SQLite
 
-Not built yet: CI, deployment. See the roadmap at the bottom.
+Not built yet: deployment. See the roadmap at the bottom.
 
 ## Running it locally
 
@@ -136,5 +136,5 @@ Full interactive docs (Swagger) at `/docs` once the backend is running.
 - [x] URL management — list with pagination/search/sort, edit, delete
 - [x] Click analytics — daily/weekly breakdown, top links, browser/OS/device parsing
 - [x] Frontend: auth pages, dashboard, analytics page, QR codes, copy button
-- [ ] CI (GitHub Actions)
+- [x] CI (GitHub Actions)
 - [ ] Deployment (Render/Fly.io)
