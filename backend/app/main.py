@@ -12,7 +12,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.routers import auth, health
+from app.routers import auth, health, redirect, urls
 
 logging.basicConfig(
     level=logging.INFO if not settings.debug else logging.DEBUG,
@@ -45,8 +45,9 @@ app.add_middleware(
 
 app.include_router(health.router)
 app.include_router(auth.router)
+app.include_router(urls.router)
 
 # Milestone roadmap (routers will be included here as we build them):
-# app.include_router(urls.router)
 # app.include_router(analytics.router)
-# app.include_router(redirect.router)  # MUST be included LAST — see routers/auth.py note on route ordering
+
+app.include_router(redirect.router)  # MUST be included LAST — see routers/redirect.py note on route ordering

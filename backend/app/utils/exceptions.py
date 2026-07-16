@@ -21,3 +21,11 @@ class UsernameAlreadyExistsError(AppError):
 
 class InvalidCredentialsError(AppError):
     pass
+
+
+class URLNotFoundError(AppError):
+    pass
+
+
+class URLExpiredError(AppError):
+    pass
