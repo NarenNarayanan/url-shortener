@@ -9,6 +9,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { AppLayout } from "@/components/layout/AppLayout";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 
 import LandingPage from "@/pages/LandingPage";
 import LoginPage from "@/pages/LoginPage";
@@ -97,9 +98,11 @@ export default function App() {
       <QueryClientProvider client={queryClient}>
         <AuthProvider>
           <TooltipProvider>
-            <BrowserRouter>
-              <AppRoutes />
-            </BrowserRouter>
+            <ErrorBoundary>
+              <BrowserRouter>
+                <AppRoutes />
+              </BrowserRouter>
+            </ErrorBoundary>
             <Toaster position="top-right" />
           </TooltipProvider>
         </AuthProvider>

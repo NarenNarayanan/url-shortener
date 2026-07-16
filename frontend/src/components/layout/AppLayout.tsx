@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
@@ -32,13 +33,20 @@ export function AppLayout() {
               <DropdownMenuTrigger render={<Button variant="ghost" className="gap-2 px-1.5" />}>
                 <Avatar className="h-6 w-6">
                   <AvatarFallback className="text-xs">
-                    {user?.username?.slice(0, 2).toUpperCase() ?? <UserIcon className="h-3 w-3" />}
+                    {user?.username ? user.username.slice(0, 2).toUpperCase() : <UserIcon className="h-3 w-3" />}
                   </AvatarFallback>
                 </Avatar>
                 <span className="text-sm">{user?.username}</span>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuLabel>{user?.email}</DropdownMenuLabel>
+              {/* Default popup width matches the trigger button's width, which is
+                  tiny here (just an avatar + username) — too narrow for an email
+                  address, so it's overridden to a fixed width instead. */}
+              <DropdownMenuContent align="end" className="w-64">
+                {/* DropdownMenuLabel wraps Base UI's MenuGroupLabel, which throws
+                    if it isn't inside a Menu.Group — see DropdownMenuGroup below. */}
+                <DropdownMenuGroup>
+                  <DropdownMenuLabel className="truncate">{user?.email}</DropdownMenuLabel>
+                </DropdownMenuGroup>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem variant="destructive" onClick={logout}>
                   <LogOut />
