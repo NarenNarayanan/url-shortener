@@ -42,7 +42,7 @@ services:
       - key: REDIS_CACHE_TTL_SECONDS
         value: "3600"
       - key: JWT_SECRET_KEY
-        generateValue: true # Render generates a long random secret for you
+        generateValue: true
       - key: JWT_ALGORITHM
         value: HS256
       - key: ACCESS_TOKEN_EXPIRE_MINUTES
@@ -50,9 +50,9 @@ services:
       - key: SHORT_CODE_LENGTH
         value: "7"
       - key: BASE_REDIRECT_URL
-        value: https://url-shortener-backend.onrender.com # UPDATE after first deploy if the name changed
+        value: https://url-shortener-backend-qzkt.onrender.com
       - key: CORS_ORIGINS
-        value: '["https://url-shortener-frontend.onrender.com"]' # UPDATE after first deploy if the name changed
+        value: '["https://url-shortener-frontend-08cb.onrender.com"]'
 
   # --- React/Vite frontend, deployed as a static site (no Docker needed) ---
   - type: web
@@ -63,8 +63,8 @@ services:
     staticPublishPath: ./dist
     envVars:
       - key: VITE_API_BASE_URL
-        value: https://url-shortener-backend.onrender.com # UPDATE if the backend's real URL differs
+        value: https://url-shortener-backend-qzkt.onrender.com
     routes:
       - type: rewrite
         source: /*
-        destination: /index.html # needed so client-side (React Router) routes don't 404 on refresh
+        destination: /index.html
