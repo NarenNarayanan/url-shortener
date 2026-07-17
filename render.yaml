@@ -1,0 +1,70 @@
+databases:
+  - name: url-shortener-db
+    databaseName: urlshortener
+    plan: free
+    postgresMajorVersion: "16"
+
+services:
+  # --- Redis-compatible cache (Valkey), used for redirect caching + rate limiting ---
+  - type: keyvalue
+    name: url-shortener-cache
+    plan: free
+    ipAllowList: [] # internal-only; the backend reaches it over Render's private network
+    maxmemoryPolicy: allkeys-lru
+
+  # --- FastAPI backend, built from backend/Dockerfile (its "prod" stage, since prod
+  #     is the LAST stage in that file, and a `docker build` with no --target builds
+  #     the last stage by default) ---
+  - type: web
+    name: url-shortener-backend
+    runtime: docker
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: APP_NAME
+        value: "URL Shortener API"
+      - key: ENVIRONMENT
+        value: production
+      - key: DEBUG
+        value: "false"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: url-shortener-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: url-shortener-cache
+          property: connectionString
+      - key: REDIS_CACHE_TTL_SECONDS
+        value: "3600"
+      - key: JWT_SECRET_KEY
+        generateValue: true # Render generates a long random secret for you
+      - key: JWT_ALGORITHM
+        value: HS256
+      - key: ACCESS_TOKEN_EXPIRE_MINUTES
+        value: "60"
+      - key: SHORT_CODE_LENGTH
+        value: "7"
+      - key: BASE_REDIRECT_URL
+        value: https://url-shortener-backend.onrender.com # UPDATE after first deploy if the name changed
+      - key: CORS_ORIGINS
+        value: '["https://url-shortener-frontend.onrender.com"]' # UPDATE after first deploy if the name changed
+
+  # --- React/Vite frontend, deployed as a static site (no Docker needed) ---
+  - type: web
+    name: url-shortener-frontend
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: ./dist
+    envVars:
+      - key: VITE_API_BASE_URL
+        value: https://url-shortener-backend.onrender.com # UPDATE if the backend's real URL differs
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html # needed so client-side (React Router) routes don't 404 on refresh
