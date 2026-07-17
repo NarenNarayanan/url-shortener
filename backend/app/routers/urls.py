@@ -9,23 +9,33 @@ from app.cache import get_redis
 from app.config import settings
 from app.database import get_db
 from app.models import User
-from app.rate_limit import limiter
+from app.rate_limit import limiter, user_or_ip_key
 from app.schemas.url import URLCreate, URLListResponse, URLOut, URLUpdate
 from app.services import url_service
-from app.utils.exceptions import URLNotFoundError
+from app.utils.exceptions import AliasAlreadyExistsError, ReservedAliasError, URLNotFoundError
 
 router = APIRouter(tags=["urls"])
 
 
+# Registered under both paths: /urls (RESTful — POST to the collection) and
+# /shorten (the exact path from the original spec). Same handler, same rate
+# limit, same behavior — just two names for the same operation, so nothing
+# that already calls /urls breaks.
+@router.post("/shorten", response_model=URLOut, status_code=status.HTTP_201_CREATED)
 @router.post("/urls", response_model=URLOut, status_code=status.HTTP_201_CREATED)
-@limiter.limit("30/minute")
+@limiter.limit("20/minute", key_func=user_or_ip_key)
 def create_url(
     request: Request,
     url_in: URLCreate,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> URLOut:
-    url = url_service.create_short_url(db, current_user, url_in, settings.short_code_length)
+    try:
+        url = url_service.create_short_url(db, current_user, url_in, settings.short_code_length)
+    except ReservedAliasError:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="That alias is reserved and can't be used")
+    except AliasAlreadyExistsError:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail="That alias is already taken")
     return URLOut.from_model(url, settings.base_redirect_url)
 
 

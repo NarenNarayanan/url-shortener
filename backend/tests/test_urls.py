@@ -95,3 +95,49 @@ def test_redirect_expired_url_returns_410(client):
 
     redirect_response = client.get(f"/{short_code}", follow_redirects=False)
     assert redirect_response.status_code == 410
+
+
+def test_create_url_with_custom_alias(client):
+    token = _register_and_login(client)
+    response = client.post(
+        "/urls",
+        json={"original_url": "https://example.com/custom", "custom_alias": "my-cool-link"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 201
+    assert response.json()["short_code"] == "my-cool-link"
+
+    redirect_response = client.get("/my-cool-link", follow_redirects=False)
+    assert redirect_response.status_code == 307
+    assert redirect_response.headers["location"] == "https://example.com/custom"
+
+
+def test_create_url_with_taken_alias_rejected(client):
+    token = _register_and_login(client)
+    headers = {"Authorization": f"Bearer {token}"}
+    client.post("/urls", json={"original_url": "https://example.com/a", "custom_alias": "taken"}, headers=headers)
+    response = client.post(
+        "/urls", json={"original_url": "https://example.com/b", "custom_alias": "taken"}, headers=headers
+    )
+    assert response.status_code == 409
+
+
+def test_create_url_with_reserved_alias_rejected(client):
+    token = _register_and_login(client)
+    response = client.post(
+        "/urls",
+        json={"original_url": "https://example.com/x", "custom_alias": "login"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 400
+
+
+def test_shorten_alias_route_behaves_the_same_as_urls(client):
+    token = _register_and_login(client)
+    response = client.post(
+        "/shorten",
+        json={"original_url": "https://example.com/via-shorten"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 201
+    assert response.json()["original_url"] == "https://example.com/via-shorten"

@@ -14,12 +14,20 @@ from sqlalchemy.orm import Session
 
 from app.models import URL, Click, User
 from app.schemas.url import URLCreate, URLUpdate
-from app.utils.exceptions import URLExpiredError, URLNotFoundError
+from app.utils.exceptions import AliasAlreadyExistsError, ReservedAliasError, URLExpiredError, URLNotFoundError
 from app.utils.short_code import generate_short_code
 from app.utils.user_agent import parse_user_agent
 
 MAX_SHORT_CODE_ATTEMPTS = 5
 CACHE_KEY_PREFIX = "url:short_code:"
+
+# Static paths that would otherwise collide with the catch-all GET /{short_code}
+# redirect route — see routers/redirect.py's note on route ordering. A custom
+# alias matching one of these would never actually be reachable as a redirect.
+RESERVED_ALIASES = {
+    "urls", "auth", "register", "login", "me", "health",
+    "docs", "redoc", "openapi.json", "favicon.ico", "shorten", "analytics",
+}
 
 
 @dataclass
@@ -37,15 +45,22 @@ def _cache_key(short_code: str) -> str:
 
 
 def create_short_url(db: Session, owner: User, url_in: URLCreate, short_code_length: int) -> URL:
-    # Collisions are astronomically unlikely at this alphabet/length, but we
-    # check rather than assume — a silent overwrite of someone else's short
-    # code would be a bad bug to have.
-    for _ in range(MAX_SHORT_CODE_ATTEMPTS):
-        code = generate_short_code(short_code_length)
-        if not db.query(URL).filter(URL.short_code == code).first():
-            break
+    if url_in.custom_alias:
+        code = url_in.custom_alias
+        if code.lower() in RESERVED_ALIASES:
+            raise ReservedAliasError(code)
+        if db.query(URL).filter(URL.short_code == code).first():
+            raise AliasAlreadyExistsError(code)
     else:
-        raise RuntimeError("Could not generate a unique short code after several attempts")
+        # Collisions are astronomically unlikely at this alphabet/length, but we
+        # check rather than assume — a silent overwrite of someone else's short
+        # code would be a bad bug to have.
+        for _ in range(MAX_SHORT_CODE_ATTEMPTS):
+            code = generate_short_code(short_code_length)
+            if not db.query(URL).filter(URL.short_code == code).first():
+                break
+        else:
+            raise RuntimeError("Could not generate a unique short code after several attempts")
 
     url = URL(
         short_code=code,
@@ -103,6 +118,28 @@ def record_click(db: Session, url_id: int, ip_address: str | None, user_agent: s
         "last_clicked_at": datetime.now(timezone.utc),
     })
     db.commit()
+
+
+def record_click_background(
+    session_factory,
+    url_id: int,
+    ip_address: str | None,
+    user_agent: str | None,
+    referrer: str | None,
+) -> None:
+    """
+    Entry point for FastAPI's BackgroundTasks. Runs after the redirect
+    response has already been sent, so it can't reuse the request's DB
+    session — that session is closed by get_db's cleanup before background
+    tasks execute. Opens (and closes) its own session instead. This is what
+    keeps the click write off the redirect's latency, which matters here
+    since GET /{short_code} is the hottest path in the whole app.
+    """
+    db = session_factory()
+    try:
+        record_click(db, url_id, ip_address, user_agent, referrer)
+    finally:
+        db.close()
 
 
 def _get_owned_url(db: Session, owner: User, short_code: str) -> URL:

@@ -30,7 +30,7 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 
 from app.cache import redis_client
-from app.database import Base, get_db
+from app.database import Base, get_db, get_session_factory
 from app.main import app
 from app.models import Click, URL, User  # noqa: F401  (registers tables on Base.metadata)
 from app.rate_limit import limiter
@@ -96,7 +96,17 @@ def client(db_session):
     def override_get_db():
         yield db_session
 
+    def override_get_session_factory():
+        # record_click_background opens its own session (correct — see
+        # url_service.py). In tests, bind that session to the SAME
+        # connection as db_session: our SAVEPOINT pattern means nothing
+        # db_session writes is ever really committed until teardown, so a
+        # session on a different connection wouldn't see it. This makes the
+        # background task's session part of the same test transaction.
+        return lambda: TestingSessionLocal(bind=db_session.connection())
+
     app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_session_factory] = override_get_session_factory
     with TestClient(app) as test_client:
         yield test_client
     app.dependency_overrides.clear()

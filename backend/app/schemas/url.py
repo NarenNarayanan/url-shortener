@@ -1,12 +1,19 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, HttpUrl
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 
 from app.models.url import URL
 
 
 class URLCreate(BaseModel):
     original_url: HttpUrl
+    custom_alias: str | None = Field(
+        default=None,
+        min_length=3,
+        max_length=20,
+        pattern=r"^[A-Za-z0-9_-]+$",
+        description="Optional custom short code (letters, numbers, hyphens, underscores only).",
+    )
     expires_at: datetime | None = None
 
 

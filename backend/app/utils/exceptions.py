@@ -29,3 +29,11 @@ class URLNotFoundError(AppError):
 
 class URLExpiredError(AppError):
     pass
+
+
+class AliasAlreadyExistsError(AppError):
+    pass
+
+
+class ReservedAliasError(AppError):
+    pass

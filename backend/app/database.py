@@ -50,3 +50,14 @@ def get_db() -> Generator[Session, None, None]:
         yield db
     finally:
         db.close()
+
+
+def get_session_factory() -> sessionmaker:
+    """
+    Returns the session factory itself, not a session — for code that needs
+    to open its OWN session independent of the current request, such as a
+    BackgroundTask that runs after get_db has already closed the request's
+    session. Injectable (like get_db) so tests can point it at the test
+    database/connection instead of the real one.
+    """
+    return SessionLocal
