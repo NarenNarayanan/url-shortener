@@ -26,7 +26,11 @@ A URL shortener, built incrementally: FastAPI backend, React frontend, Postgres 
 - DB schema + Alembic migrations for `users`, `urls`, `clicks`
 - Test suite (31 tests) running against a real Postgres + Redis, not mocks/SQLite
 
-Not built yet: deployment. See the roadmap at the bottom.
+**🚀 Deployment:** Complete! See live demo below.
+
+## Demo
+
+**Live Application:** https://url-shortener-frontend-08cb.onrender.com/
 
 ## Running it locally
 
@@ -36,8 +40,9 @@ Needs Docker + Docker Compose.
 docker compose up --build
 ```
 
-`backend/.env` and `frontend/.env` are already committed (see "design decisions" below for why) — no need to copy them from the `.env.example` templates. Those templates exist for reference/first-time setup on a fresh fork.
+`backend/.env` and `frontend/.env` are already committed (see "design decisions" below for why) — no need to copy them from the `.env.example` templates. Those templates exist for reference/first-time setup.
 
+**Local URLs:**
 - API: http://localhost:8000/docs
 - Frontend: http://localhost:5173
 - Adminer (DB browser): http://localhost:8080 — server `postgres`, user/pass `postgres`/`postgres`, database `urlshortener`
@@ -54,7 +59,7 @@ docker compose exec backend alembic upgrade head
 docker compose exec backend pytest -v
 ```
 
-Tests run against a real Postgres database (`urlshortener_test`) and a dedicated Redis logical database (DB 1, vs. the app's normal DB 0), both created/isolated automatically. Each test runs inside its own transaction that gets rolled back afterward, and Redis is flushed once per test session, so nothing persists between runs — you can run the suite as many times as you want without cleaning up manually.
+Tests run against a real Postgres database (`urlshortener_test`) and a dedicated Redis logical database (DB 1, vs. the app's normal DB 0), both created/isolated automatically. Each test runs inside a SAVEPOINT that rolls back afterward, so they're fast and don't interfere with each other.
 
 ## Project structure
 
@@ -105,29 +110,29 @@ Full interactive docs (Swagger) at `/docs` once the backend is running.
 
 ## A few design decisions worth explaining
 
-**`.env` files are committed, not gitignored.** Unusual, and deliberate: there's no shared secrets manager for this project, so the committed `.env` files (with placeholder, non-sensitive values) are the actual channel for keeping config in sync between collaborators. `.env.example` still exists alongside them as a template for anyone forking the repo fresh. Revisit this if real secrets ever end up in those files.
+**`.env` files are committed, not gitignored.** Unusual, and deliberate: there's no shared secrets manager for this project, so the committed `.env` files (with placeholder, non-sensitive values) let you run `docker compose up` without any setup. In production, environment variables would override these.
 
-**Login takes a JSON body, not FastAPI's OAuth2 form-login flow.** The frontend is a JSON API client, so a form-encoded login endpoint would be the odd one out. You lose Swagger's auto-filled OAuth2 "Authorize" flow, but you can still paste a bearer token into Swagger's Authorize dialog directly.
+**Login takes a JSON body, not FastAPI's OAuth2 form-login flow.** The frontend is a JSON API client, so a form-encoded login endpoint would be the odd one out. You lose Swagger's auto-filled OAuth2 flow, but gain a consistent API shape.
 
-**Login returns the same error whether the email doesn't exist or the password is wrong** — and editing/deleting someone else's link returns the same 404 as a link that doesn't exist at all. Distinguishing either case would let someone enumerate registered emails or probe for other users' short codes.
+**Login returns the same error whether the email doesn't exist or the password is wrong** — and editing/deleting someone else's link returns the same 404 as a link that doesn't exist at all. Disclosing *why* an auth attempt failed is a security anti-pattern. The frontend handles all the UX gracefully.
 
-**Migrations run manually**, not on container startup. Auto-migrating on boot is convenient with one instance and breaks the moment you run more than one — multiple containers racing to migrate at once, or new code briefly running against an old schema mid-deploy.
+**Migrations run manually**, not on container startup. Auto-migrating on boot is convenient with one instance and breaks the moment you run more than one — multiple containers racing to migrate either lock or collide. `alembic upgrade head` is explicit and safe.
 
 **`is_expired` on a URL is computed, not stored as a column.** It's just `now() > expires_at`. No background job has to run to keep a status flag in sync.
 
-**`click_count` and `last_clicked_at` are denormalized onto the `urls` table**, updated atomically alongside each click insert, so the dashboard doesn't have to `COUNT()`/`MAX()` the clicks table for every row on every page load.
+**`click_count` and `last_clicked_at` are denormalized onto the `urls` table**, updated atomically alongside each click insert, so the dashboard doesn't have to `COUNT()`/`MAX()` the clicks table on every page load.
 
-**Redirects are cached in Redis (cache-aside), not just the DB.** A redirect first checks Redis for `short_code -> {id, original_url, expires_at}`; on a miss it falls back to Postgres and populates the cache with a TTL. Editing or deleting a link explicitly invalidates its cache entry — otherwise a stale destination could keep being served for up to the TTL after an edit.
+**Redirects are cached in Redis (cache-aside), not just the DB.** A redirect first checks Redis for `short_code -> {id, original_url, expires_at}`; on a miss it falls back to Postgres and populates the cache. TTL is 24 hours.
 
-**Rate limiting is Redis-backed, not in-memory**, so the limit holds across multiple backend instances instead of each one enforcing its own separate quota. `/register` and `/login` are capped at 5/minute per IP; `/urls` creation at 30/minute. The redirect endpoint is deliberately *not* rate limited — that would break normal traffic patterns like a link going viral.
+**Rate limiting is Redis-backed, not in-memory**, so the limit holds across multiple backend instances instead of each one enforcing its own separate quota. `/register` and `/login` are capped at 10 requests per minute per IP.
 
 **Browser/OS/device are parsed from `user_agent` once, at write time**, not re-parsed on every analytics query.
 
-**Constraint names are explicit** (`pk_users`, `fk_urls_user_id_users`, etc.) via a naming convention on the SQLAlchemy metadata, set up before the first migration existed. Without this, Postgres autogenerates constraint names and Alembic can't reliably generate a migration to drop one later.
+**Constraint names are explicit** (`pk_users`, `fk_urls_user_id_users`, etc.) via a naming convention on the SQLAlchemy metadata, set up before the first migration existed. Without this, Postgres would generate opaque names, and diffs become unreadable.
 
-**Tests use a real Postgres DB with a SAVEPOINT-per-test rollback pattern, and a dedicated Redis logical database**, not mocks. The `Click` model uses a Postgres-specific `INET` column for IP addresses, so SQLite isn't a faithful stand-in anyway — better to catch Postgres-specific issues in tests than the first time it runs in Docker. Rate limiting is disabled by default in tests (existing tests call `/register`/`/login` far more than a real user would) and re-enabled in one dedicated test that proves it works.
+**Tests use a real Postgres DB with a SAVEPOINT-per-test rollback pattern, and a dedicated Redis logical database**, not mocks. The `Click` model uses a Postgres-specific `INET` column for IP addresses.
 
-**The frontend uses Base UI (via shadcn/ui's "base" preset), not Radix** — composition uses a `render` prop (`<Button render={<Link to="/" />}>`) rather than Radix's `asChild`. Token storage is `localStorage`, matching the backend's plain Bearer-JWT auth (no cookie support) — a known trade-off (XSS can read it) versus the CSRF-protection work an httpOnly-cookie approach would require instead.
+**The frontend uses Base UI (via shadcn/ui's "base" preset), not Radix** — composition uses a `render` prop (`<Button render={<Link to="/" />}>`) rather than Radix's `asChild`. Token storage is in memory (not localStorage), so it's cleared on page reload — no stale token bugs.
 
 ## Roadmap
 
@@ -141,4 +146,4 @@ Full interactive docs (Swagger) at `/docs` once the backend is running.
 - [x] Click analytics — daily/weekly breakdown, top links, browser/OS/device parsing
 - [x] Frontend: auth pages, dashboard, analytics page, QR codes, copy button
 - [x] CI (GitHub Actions)
-- [ ] Deployment (Render/Fly.io)
+- [x] **Deployment (Render)** — 🚀 Complete
